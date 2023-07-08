@@ -134,14 +134,17 @@ class CloudMonitoringMetricsExporter(MetricExporter):
         ) = divmod(time_ns(), NANOS_PER_SECOND)
         self._prefix = prefix
 
-    def _batch_write(self, series: List[TimeSeries]) -> None:
+    def _batch_write(self, series: List[TimeSeries], timeout: float = 10) -> None:
         """Cloud Monitoring allows writing up to 200 time series at once
 
         :param series: ProtoBuf TimeSeries
+        :param timeout: The total timeout for the batch write in seconds.
         :return:
         """
+        deadline = time.time() + timeout
+
         write_ind = 0
-        while write_ind < len(series):
+        while write_ind < len(series) and time.time() < deadline:
             self.client.create_time_series(
                 CreateTimeSeriesRequest(
                     name=self.project_name,
@@ -149,11 +152,13 @@ class CloudMonitoringMetricsExporter(MetricExporter):
                         write_ind : write_ind + MAX_BATCH_WRITE
                     ],
                 ),
+                timeout=deadline - time.time(),
             )
             write_ind += MAX_BATCH_WRITE
 
     def _get_metric_descriptor(
         self, metric: Metric
+        timeout: float = 10,
     ) -> Optional[MetricDescriptor]:
         """We can map Metric to MetricDescriptor using Metric.name or
         MetricDescriptor.type. We create the MetricDescriptor if it doesn't
@@ -161,8 +166,11 @@ class CloudMonitoringMetricsExporter(MetricExporter):
         a no-op if it already exists.
 
         :param record:
+        :param timeout: The total timeout for the batch write in seconds.
         :return:
         """
+        deadline = time.time() + timeout
+
         descriptor_type = f"{self._prefix}/{metric.name}"
         if descriptor_type in self._metric_descriptors:
             return self._metric_descriptors[descriptor_type]
@@ -232,6 +240,7 @@ class CloudMonitoringMetricsExporter(MetricExporter):
                 CreateMetricDescriptorRequest(
                     name=self.project_name, metric_descriptor=descriptor
                 )
+                timeout=deadline - time.time(),
             )
         # pylint: disable=broad-except
         except Exception as ex:
@@ -294,10 +303,10 @@ class CloudMonitoringMetricsExporter(MetricExporter):
     def export(
         self,
         metrics_data: MetricsData,
-        # TODO(aabmass): pass timeout to api calls
         timeout_millis: float = 10_000,
         **kwargs,
     ) -> MetricExportResult:
+        deadline = time.time() + timeout_millis / 1000.0
         all_series = []
 
         for resource_metric in metrics_data.resource_metrics:
@@ -327,7 +336,10 @@ class CloudMonitoringMetricsExporter(MetricExporter):
                         ),
                     )
 
-                    descriptor = self._get_metric_descriptor(metric)
+                    descriptor = self._get_metric_descriptor(
+                        metric,
+                        timeout = deadline - time.time(),
+                    )
                     if not descriptor:
                         continue
 
@@ -358,7 +370,10 @@ class CloudMonitoringMetricsExporter(MetricExporter):
                         all_series.append(series)
 
         try:
-            self._batch_write(all_series)
+            self._batch_write(
+                all_series,
+                timeout=deadline - time.time(),
+            )
         # pylint: disable=broad-except
         except Exception as ex:
             logger.error(
