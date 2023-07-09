@@ -15,7 +15,7 @@
 import logging
 import random
 from dataclasses import replace
-from time import time_ns
+from time import time, time_ns
 from typing import Dict, List, NoReturn, Optional, Set, Union
 
 import google.auth
@@ -141,10 +141,10 @@ class CloudMonitoringMetricsExporter(MetricExporter):
         :param timeout: The total timeout for the batch write in seconds.
         :return:
         """
-        deadline = time.time() + timeout
+        deadline = time() + timeout
 
         write_ind = 0
-        while write_ind < len(series) and time.time() < deadline:
+        while write_ind < len(series) and time() < deadline:
             self.client.create_time_series(
                 CreateTimeSeriesRequest(
                     name=self.project_name,
@@ -152,12 +152,12 @@ class CloudMonitoringMetricsExporter(MetricExporter):
                         write_ind : write_ind + MAX_BATCH_WRITE
                     ],
                 ),
-                timeout=deadline - time.time(),
+                timeout=deadline - time(),
             )
             write_ind += MAX_BATCH_WRITE
 
     def _get_metric_descriptor(
-        self, metric: Metric
+        self, metric: Metric,
         timeout: float = 10,
     ) -> Optional[MetricDescriptor]:
         """We can map Metric to MetricDescriptor using Metric.name or
@@ -169,7 +169,7 @@ class CloudMonitoringMetricsExporter(MetricExporter):
         :param timeout: The total timeout for the batch write in seconds.
         :return:
         """
-        deadline = time.time() + timeout
+        deadline = time() + timeout
 
         descriptor_type = f"{self._prefix}/{metric.name}"
         if descriptor_type in self._metric_descriptors:
@@ -239,8 +239,8 @@ class CloudMonitoringMetricsExporter(MetricExporter):
             response_descriptor = self.client.create_metric_descriptor(
                 CreateMetricDescriptorRequest(
                     name=self.project_name, metric_descriptor=descriptor
-                )
-                timeout=deadline - time.time(),
+                ),
+                timeout=deadline - time(),
             )
         # pylint: disable=broad-except
         except Exception as ex:
@@ -306,7 +306,7 @@ class CloudMonitoringMetricsExporter(MetricExporter):
         timeout_millis: float = 10_000,
         **kwargs,
     ) -> MetricExportResult:
-        deadline = time.time() + timeout_millis / 1000.0
+        deadline = time() + timeout_millis / 1000.0
         all_series = []
 
         for resource_metric in metrics_data.resource_metrics:
@@ -338,7 +338,7 @@ class CloudMonitoringMetricsExporter(MetricExporter):
 
                     descriptor = self._get_metric_descriptor(
                         metric,
-                        timeout = deadline - time.time(),
+                        timeout = deadline - time(),
                     )
                     if not descriptor:
                         continue
@@ -372,7 +372,7 @@ class CloudMonitoringMetricsExporter(MetricExporter):
         try:
             self._batch_write(
                 all_series,
-                timeout=deadline - time.time(),
+                timeout=deadline - time(),
             )
         # pylint: disable=broad-except
         except Exception as ex:
